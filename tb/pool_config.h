@@ -1,5 +1,5 @@
 /******************************************************************************
- *  Copyright (c) 2021, Xilinx, Inc.
+ *  Copyright (c) 2019, Xilinx, Inc.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -29,17 +29,10 @@
  *  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+#define KERNEL_DIM 2
+#define WIDTH 4 
+#define FM_Channels1 16
+#define IFMDim1 16
+#define OFMDim1 8
+#define PRECISION 3
 
-#define SIMD1 6
-#define KERNEL_DIM_x 21
-#define KERNEL_DIM_y 1
-#define IFM_Channels1 6
-#define IFMDim_x 30
-#define IFMDim_y 1
-#define OFMDim_x 10
-#define OFMDim_y 1
-#define STRIDE_x 1
-#define STRIDE_y 1
-#define INPUT_PRECISION1 16
-#define DILATION_x 1
-#define DILATION_y 1

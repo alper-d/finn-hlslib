@@ -32,9 +32,8 @@
 /******************************************************************************
  *
  *  Authors: Giulio Gambardella <giuliog@xilinx.com>
- *           Felix Jentzsch <felixj@xilinx.com>
  *
- *  \file pool_tb.hpp
+ *  \file pool.hpp
  *
  *  C++ Implementation of a max pool layer, used for testbench
  *
@@ -63,30 +62,6 @@ template<int MAX_IMAGE,
 								}
 						out[n][x][y][h] = tmp;
 					}
-	}
-
-template<int MAX_IMAGE,
-	int IFMDim,
-	int OFMDim,
-	int FMCh,
-	int kernel,
-	int stride,
-	typename TI>
-	void pool_1d(TI const img[MAX_IMAGE][IFMDim][FMCh], TI out[MAX_IMAGE][OFMDim][FMCh]){
-		for(int n=0;n<MAX_IMAGE;n++)
-			for(int x=0;x<OFMDim;x++)
-				for(int h=0;h<FMCh;h++){
-					TI tmp = 0;
-					for (int kx=0;kx<kernel;kx++){
-						unsigned const idx = x*stride+kx;
-						if (idx < IFMDim){
-							if(img[n][idx][h]>tmp){
-								tmp=img[n][idx][h];
-							}
-						}
-					}
-					out[n][x][h] = tmp;
-				}
 	}
 
 #endif

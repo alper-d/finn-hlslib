@@ -1,5 +1,5 @@
 /******************************************************************************
- *  Copyright (c) 2021, Xilinx, Inc.
+ *  Copyright (c) 2019, Xilinx, Inc.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -29,35 +29,58 @@
  *  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
-/******************************************************************************
- *
- *  Authors: Timoteo Garcia Bertoa <timoteog@xilinx.com>
- *
- *  \file conv_stmr_top.cpp
- *
- *  HLS Top function with a single tmrc layer for unit testing
- *
- *****************************************************************************/
-#define AP_INT_MAX_W 8191
-#include <hls_stream.h>
-using namespace hls;
-#include "ap_int.h"
-#include "bnn-library.h"
-#include "activations.hpp"
-#include "weights.hpp"
-#include "activations.hpp"
-#include "interpret.hpp"
-#include "mvau.hpp"
-#include "conv.hpp"
-#include "data/memdata_tmrc.h"
-#include "data/config_tmrc.h"
+#define SIMD_in 2
+#define SIMD_out 1
+#define KERNEL_DIM 2
+#define IFM_Channels 2
+#define IFMDim 6
+#define OFMDim 3
+#define STRIDE 2
+#define INPUT_PRECISION 8
+#define MMV 1
+#define INPUT_MULTIPLIER 1
 
-void Testbench_tmrc_stmr(stream<ap_uint<OFM_Channels1*ACTIVATION_PRECISION> > & in,
-						 stream<ap_uint<(OFM_Channels1-NUM_RED*(REDF-1))*ACTIVATION_PRECISION> > & out,
-						 unsigned int numReps,
-						 ap_uint<2> &errortype){
-#pragma HLS DATAFLOW
+// new parameters
 
-	//Error check
-	TMRCheck_Batch<ACTIVATION_PRECISION, OFM_Channels1, NUM_RED, REDF, OFMDim1, MAX_CH_WIDTH>(in, out, errortype, PARAM::channel_mask, PARAM::red_ch_index, numReps);
+namespace PARAM{
+	// For default parameters the matrix is 8 x 9 in size
+	// 		Where the 8 comes from: KERNEL_DIM * KERNEL_DIM * IFM_Channels / SIMD
+	// 		And 9 comes from: OFMDim * OFMDim
+	// So we need 8 booleans for the default parameters
+	static const bool ColsToPrune[8]={
+			false,
+			true,
+			false,
+			false,
+			true,
+			true,
+			false,
+			false,
+	};
+    // For default parameters the matrix is 8 x 9 in size
+    // 		Where the 8 comes from: KERNEL_DIM * KERNEL_DIM * IFM_Channels / SIMD_in
+    //          With: KERNEL_DIM=2, IFM_Channels=2, SIMD_in=1
+    //      Where the 1 comes from: SIMD_in
+    //          With: SIMD_in=1
+    // In this special case all values must be true, because no actual pruning takes place for SIMD_in=SIMD_out=1
+    /*static bool SIMD_pruning_mask[8][1] = {
+            {true},
+            {true},
+            {true},
+            {true},
+            {true},
+            {true},
+            {true},
+            {true},
+    };*/
+	// New default parameters, true and false can be set somewhat randomly,
+	// but there needs to be one true and one false per line
+	static const bool SIMD_pruning_mask[4][2] = {
+	            {true, false},
+	            {false, true},
+	            {true, false},
+	            {true, false},
+	};
 }
+
+

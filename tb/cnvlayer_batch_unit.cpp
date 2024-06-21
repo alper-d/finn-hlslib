@@ -9,8 +9,8 @@ using namespace hls;
 #include "interpret.hpp"
 #include "mvau.hpp"
 #include "conv.hpp"
-#include "data/memdata.h"
-#include "data/config.h"
+#include "memdata.h"
+#include "config.h"
 
 // adheres to new config.h
 #define OFD OFMDim1

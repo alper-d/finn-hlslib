@@ -33,32 +33,32 @@
  *
  *  Authors: Giulio Gambardella <giuliog@xilinx.com>
  *
- *  \file swg_kernelstride_tb.cpp
+ *  \file swg_tb.cpp
  *
- *  Testbench for the sliding window generator HLS block with kernel%stride !=0
+ *  Testbench for the sliding window generator HLS block
  *
  *****************************************************************************/
 #include <hls_stream.h>
 #include "ap_int.h"
 #include <iostream>
 #include <string>
-#include "data/input_gen_kernelstride_mmv.h"
+#include "input_gen_SIMD_pruned.h"
 #include "math.h"
 using namespace hls;
 using namespace std;
 
 #define MAX_IMAGES 2
 
-void Testbench(stream<ap_uint<IFM_Channels*INPUT_PRECISION> > & in, stream<ap_uint<IFM_Channels*INPUT_PRECISION*MMV> > & out, unsigned int numReps);
+
+void Testbench(stream<ap_uint<IFM_Channels*INPUT_PRECISION> > & in, stream<ap_uint<INPUT_PRECISION> > & out, unsigned int numReps);
 
 
 int main()
 {
+static	ap_uint<INPUT_PRECISION> INPUT_IMAGES[MAX_IMAGES][IFMDim*IFMDim][IFM_Channels];
+stream<ap_uint<IFM_Channels*INPUT_PRECISION> > input_stream("input_stream");
+stream<ap_uint<INPUT_PRECISION> > output_stream("output_stream");
 	unsigned int counter = 0;
-	static	ap_uint<INPUT_PRECISION> INPUT_IMAGES[MAX_IMAGES][IFMDim*IFMDim][IFM_Channels];
-	stream<ap_uint<IFM_Channels*INPUT_PRECISION> > input_stream("input_stream");
-	stream<ap_uint<IFM_Channels*INPUT_PRECISION*MMV> > output_stream("output_stream");
-	
 	for (unsigned int n_image = 0; n_image < MAX_IMAGES; n_image++) {
 		for (unsigned int oy = 0; oy < IFMDim; oy++) {
 			for (unsigned int ox = 0; ox < IFMDim; ox++) {
@@ -84,16 +84,27 @@ int main()
 					for (unsigned int kx = 0; kx < KERNEL_DIM; kx++) {
 						unsigned int input_base = (oy*STRIDE) * IFMDim + (ox*STRIDE);
 						unsigned int input_ind = input_base + ky * IFMDim + kx;
-						ap_uint<IFM_Channels*INPUT_PRECISION*MMV> outElem = output_stream.read();
+
 						for(unsigned int channel = 0; channel < IFM_Channels; channel++){
-							ap_uint<INPUT_PRECISION> out_chan = 0;
-							out_chan = outElem(INPUT_PRECISION-1,0);
+							// if a column was pruned we need to skip parts of the matrix
+                            //In function:
+                            //  int pruning_index = count_simd + k_x*IFMChannels/SIMD + k_y*IFMChannels/SIMD*ConvKernelDim;
+							//In TB:
+							//  int pruning_index = channel/SIMD + kx*IFM_Channels/SIMD + ky*IFM_Channels/SIMD*KERNEL_DIM;
+                            int SIMD_block_index = channel/SIMD_in + kx*IFM_Channels/SIMD_in + ky*IFM_Channels/SIMD_in*KERNEL_DIM;
+                            // Skip a data point if it was pruned
+                            // not sure about the usage of "channel" in here, but it seems produce correct results
+                            bool was_retained = PARAM::SIMD_pruning_mask[SIMD_block_index][channel];
+                            if (was_retained == false){
+                            	continue;
+                            }
+
+							ap_uint<INPUT_PRECISION> out_chan = output_stream.read();
 							if (((INPUT_IMAGES[n_image][input_ind][channel])) != out_chan){
 								std::cout << "ERROR: " <<  " Expected " << INPUT_IMAGES[n_image][input_ind][channel] << " actual " <<  out_chan << std::endl;
-								std::cout << "oy= " << oy << " ox= " << ox << " ky= " << ky << " kx= " << kx << " channel=" << channel << std::endl;
+								std::cout << "oy= " << oy << " ox= " << ox << " ky= " << ky << " kx= " << kx << std::endl;
 								return 1;
 							}
-							outElem = outElem >> INPUT_PRECISION;
 						}
 					}
 				}

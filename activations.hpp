@@ -53,82 +53,6 @@
 #define ACTIVATIONS_HPP
 
 #include "interpret.hpp"
-#include <hls_stream.h>
-#include <functional>
-
-namespace comp{
-  using std::binary_function;
-
-  template<typename input_type_1 = void, typename input_type_2 = void>
-    struct greater;
-
-  template<typename input_type_1 = void, typename input_type_2 = void>
-    struct less;
-
-  template<typename input_type_1 = void, typename input_type_2 = void>
-    struct greater_equal;
-
-  template<typename input_type_1 = void, typename input_type_2 = void>
-    struct less_equal;
-
-  template<typename input_type_1 = void, typename input_type_2 = void, typename result_type = void>
-    struct add;	
-
-  template<typename input_type_1 = void, typename input_type_2 = void, typename result_type = void>
-    struct mul;	
-
-  template<typename input_type_1 = void, typename input_type_2 = void, typename result_type = void>
-    struct max;
-
-  template<typename input_type_1, typename input_type_2>
-    struct greater : public binary_function<input_type_1, input_type_2, ap_uint<1>> {
-      ap_uint<1>
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a > b; }
-    };
-
-  template<typename input_type_1, typename input_type_2>
-    struct less : public binary_function<input_type_1, input_type_2, ap_uint<1>> {
-      ap_uint<1>
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a < b; }
-    };
-
-  template<typename input_type_1, typename input_type_2>
-    struct greater_equal : public binary_function<input_type_1, input_type_2, ap_uint<1>> {
-      ap_uint<1>
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a >= b; }
-    };
-
-  template<typename input_type_1, typename input_type_2>
-    struct less_equal : public binary_function<input_type_1, input_type_2, ap_uint<1>> {
-      ap_uint<1>
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a <= b; }
-    };
-	
-  template<typename input_type_1, typename input_type_2, typename result_type>
-    struct add : public binary_function<input_type_1, input_type_2, result_type> {
-      result_type
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a + b; }
-    };
-
-  template<typename input_type_1, typename input_type_2, typename result_type>
-    struct mul : public binary_function<input_type_1, input_type_2, result_type> {
-      result_type
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a * b; }
-    };
-
-  template<typename input_type_1, typename input_type_2, typename result_type>
-    struct max : public binary_function<input_type_1, input_type_2, result_type> {
-      result_type
-      operator()(const input_type_1& a, const input_type_2& b) const
-      { return a > b ? a : b; }
-    };
-}
 
 /**
  * General contract for activation functions.
@@ -141,7 +65,7 @@ namespace comp{
 template<typename TA, typename TO>
 class Activation {
 public:
-  TA init(__attribute__((unused)) unsigned const  nf, __attribute__((unused)) unsigned const  pe) const {
+  TA init(unsigned const  nf, unsigned const  pe) const {
 #pragma HLS inline
     return  TA(0);
   }
@@ -159,7 +83,7 @@ public:
 template<typename T>
 class PassThroughActivation : public Activation<T, T> {
 public:
-  T activate(__attribute__((unused)) unsigned const  nf, __attribute__((unused)) unsigned const  pe, T const &accu) const {
+  T activate(unsigned const  nf, unsigned const  pe, T const &accu) const {
 #pragma HLS inline
     return  accu;
   }
@@ -172,7 +96,7 @@ public:
  * The default comparison returns true if the threshold value is
  * smaller than the passed accumulator value.
  */
-template<typename TA, typename Compare = comp::less<TA, TA>>
+template<typename TA, typename Compare = std::less<TA>>
 class ThresholdActivation : public Activation<TA, bool> {
   TA const  m_threshold;
 public:
@@ -181,7 +105,7 @@ public:
   }
 
 public:
-  bool activate(__attribute__((unused)) unsigned const  nf, __attribute__((unused)) unsigned const  pe, TA const &accu) const {
+  bool activate(unsigned const  nf, unsigned const  pe, TA const &accu) const {
 #pragma HLS inline
     return  Compare()(m_threshold, accu);
   }
@@ -198,13 +122,13 @@ public:
  * the indexed row is smaller than the passed accumulator value.
  */
 template<unsigned NF, unsigned PE, unsigned NumTH, 
-	 typename TA, typename TR, int ActVal = 0, typename Compare = comp::less<TA, TA>>
+	 typename TA, typename TR, int ActVal = 0, typename Compare = std::less<TA>>
 class ThresholdsActivation {
 public:
   TA m_thresholds[PE][NF][NumTH];
   
 public:
-  TA init(__attribute__((unused)) unsigned const  nf, __attribute__((unused)) unsigned const  pe) const {
+  TA init(unsigned const  nf, unsigned const  pe) const {
 #pragma HLS inline
     return  TA(0);
   }
@@ -238,12 +162,12 @@ public:
  */
 
 template<unsigned NF, unsigned PE,
-   typename TI, typename TP, typename TR, typename Fxn = comp::mul<TI, TP, TR>>
+   typename TI, typename TP, typename TR, typename Fxn = std::multiplies<TR>>
 class ChannelWiseOperation {
 public:
   TP parameters[PE][NF];
 public:
-  TI init(__attribute__((unused)) unsigned const  nf, __attribute__((unused)) unsigned const  pe) const {
+  TI init(unsigned const  nf, unsigned const  pe) const {
 #pragma HLS inline
     return  TI(0);
   }
@@ -261,8 +185,8 @@ public:
  * The function performs thresholds comparison with input activation vector, 
  * and generating output based on the comparison results
  *
- * \tparam ImgDim         Total spatial size of input feature map
- * \tparam NumChannels    Number of channels in input feature map
+ * \tparam ImgDim         Width and Heigth of the Input Feature Map (assumed square)
+ * \tparam NumChannels    Heigth of the input matrix
  * \tparam PE             Number of output rows computed in parallel
  * \tparam TSrcI          DataType of the input activation (as used in the MAC)
  * \tparam TDstI          DataType of the output activation (as generated by the activation)
@@ -287,15 +211,19 @@ void Thresholding_Batch(hls::stream<TI> &in,
 
   // how many different rows each neuron will compute
   // alternatively: number of vertical matrix chunks
-  constexpr unsigned  NF = NumChannels / PE;
+  unsigned const NF = NumChannels / PE;
+
+  unsigned nf = 0;
+  unsigned tile = 0; // invariant: tile = nf*SF + sf
 
   // everything merged into a common iteration space (one "big" loop instead
   // of smaller nested loops) to get the pipelinening the way we want
-  unsigned nf = 0;
-  for (unsigned i = 0; i < reps * ImgDim * NF; i++) {
-#pragma HLS pipeline style=flp II=1
+  for (unsigned i = 0; i < reps * ImgDim * ImgDim * NF; i++)
+  {
+    #pragma HLS PIPELINE II=1
 
-    TI const  inElem = in.read();
+    TI inElem;
+    inElem = in.read();
     auto outElem = TDstI().template operator()<TO>();
     for (unsigned pe = 0; pe < PE; pe++)
     {
@@ -310,78 +238,4 @@ void Thresholding_Batch(hls::stream<TI> &in,
     }
   }
 }
-
-/*!
- * \brief Thresholding function for multiple images, with streaming thresholds
- *
- * The function performs thresholds comparison with input activation vector, 
- * and generating output based on the comparison results
- *
- * \tparam ImgDim         Total spatial size of input feature map
- * \tparam NumChannels    Number of channels in input feature map
- * \tparam PE             Number of output rows computed in parallel
- * \tparam TSrcI          DataType of the input activation (as used in the MAC)
- * \tparam TDstI          DataType of the output activation (as generated by the activation)
- * \tparam ActVal         Initial value of activation at start of thresholding procedure
- * \tparam TT             DataType of the thresholds stream
- * \tparam NumSteps       Number of thresholds per activation
- * \tparam TI             DataType of the input stream - safely deducible from the paramaters
- * \tparam TO             DataType of the output stream - safely deducible from the paramaters
- *
- * \param in              Input stream
- * \param out             Output stream
- * \param weight          Weight stream
- * \param reps            Number of time the function has to be repeatedly executed (e.g. number of images)
- */
-template <
-    unsigned ImgDim, unsigned NumChannels, unsigned PE,
-    typename TSrcI = Identity, typename TDstI = Identity,
-    int ActVal=0, typename TT, unsigned int NumSteps,
-    typename TI, typename TO>
-void Thresholding_Stream_Batch(hls::stream<TI> &in,
-                        hls::stream<TO> &out,
-                        hls::stream<ap_uint<PE*NumSteps*TT::width>> &weight,
-                        int const reps)
-{
-
-  // how many different rows each neuron will compute
-  // alternatively: number of vertical matrix chunks
-  unsigned const NF = NumChannels / PE;
-
-  ThresholdsActivation<1, PE, NumSteps, TT, TO, ActVal, comp::less_equal<TT, TT>> internal_thr;
-#pragma HLS ARRAY_PARTITION variable=internal_thr.m_thresholds complete dim=0
-
-  // everything merged into a common iteration space (one "big" loop instead
-  // of smaller nested loops) to get the pipelinening the way we want
-  for (unsigned i = 0; i < reps * ImgDim * NF; i++)
-  {
-#pragma HLS pipeline style=flp II=1
-
-    ap_uint<PE*NumSteps*TT::width> packed_thr;
-    packed_thr = weight.read();
-    // slicer to get 1 PE's worth of thresholds
-    auto const pe_slicer = Slice<ap_uint<NumSteps*TT::width>>()(packed_thr);
-
-    TI inElem;
-    inElem = in.read();
-    auto outElem = TDstI().template operator()<TO>();
-
-    for (unsigned pe = 0; pe < PE; pe++)
-    {
-#pragma HLS UNROLL
-      // slicer to get individual thresholds
-      auto const thr_slicer = Slice<TT>()(pe_slicer(pe, 0));
-      for (unsigned nt = 0; nt < NumSteps; nt++)
-      {
-#pragma HLS UNROLL
-        internal_thr.m_thresholds[pe][0][nt] = thr_slicer(nt, 0);
-      }
-
-      auto const act = TSrcI()(inElem);
-      outElem(pe,0,1) = internal_thr.activate(0, pe, act(pe,0));
-    }
-    out.write(outElem);
-  }
-}
-
 #endif

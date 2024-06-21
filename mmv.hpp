@@ -56,4 +56,5 @@ public: ap_uint<DataWidth> data[NumChannels];
 	
 };
 
+
 #endif

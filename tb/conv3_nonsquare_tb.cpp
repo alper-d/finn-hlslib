@@ -44,12 +44,12 @@
 #include <cstring>
 #include <hls_stream.h>
 #include <cstdlib>
-#define AP_INT_MAX_W 8191
+#define AP_INT_MAX_W 16384
 #include "ap_int.h"
 #include "weights.hpp"
 #include "bnn-library.h"
-#include "data/memdata_nonsquare.h"
-#include "data/config_nonsquare.h"
+#include "memdata_nonsquare.h"
+#include "config_nonsquare.h"
 #include "activations.hpp"
 #include "weights.hpp"
 #include "activations.hpp"
@@ -97,10 +97,9 @@ int main()
 	unsigned int ky=0;
 	unsigned int chan_count=0;
 	unsigned int out_chan_count=0;
-
-	for(int pe=0;pe <PE1;pe++){
-		for (unsigned int oy = 0; oy < TY; oy++) {
-			for (unsigned int ox = 0; ox <TX; ox++) {
+	for (unsigned int oy = 0; oy < TY; oy++) {
+		for (unsigned int ox = 0; ox <TX; ox++) {
+			for(int pe=0;pe <PE1;pe++){
 				for(int simd=0;simd<SIMD1;simd++){
 					W1[out_chan_count][kx][ky][chan_count] = PARAM::weights.weights(oy*TX + ox)[pe][simd];
 			    	chan_count++;

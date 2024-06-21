@@ -1,5 +1,5 @@
 /******************************************************************************
- *  Copyright (c) 2021, Xilinx, Inc.
+ *  Copyright (c) 2019, Xilinx, Inc.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -31,12 +31,11 @@
  ******************************************************************************/
 /******************************************************************************
  *
- *  Authors: Timoteo Garcia Bertoa <timoteog@xilinx.com>
+ *  Authors: Giulio Gambardella <giuliog@xilinx.com>
  *
- *  \file conv_stmr_top.cpp
+ *  \file input_gen.cpp
  *
- *  HLS Top function with a single convolutional layer for unit testing
- *  including TMR check
+ *  HLS Top function with a single HLS sliding-window generator block unit testing
  *
  *****************************************************************************/
 #include <hls_stream.h>
@@ -44,32 +43,29 @@ using namespace hls;
 #include "ap_int.h"
 #include "bnn-library.h"
 
-#include "activations.hpp"
-#include "weights.hpp"
-#include "activations.hpp"
-#include "interpret.hpp"
-#include "mvau.hpp"
-#include "conv.hpp"
-#include "data/memdata_inj.h"
-#include "data/config_inj.h"
+// new/changed includes
+#include "input_gen_pruned.h"
 
-void Testbench_conv_inj_stmr(stream<ap_uint<IFM_Channels1*INPUT_PRECISION> > & in,
-						 stream<ap_uint<(OFM_Channels1-NUM_RED*(REDF-1))*ACTIVATION_PRECISION> > & out,
-						 unsigned int numReps,
-						 ap_uint<2> &errortype){
+
+void Testbench(stream<ap_uint<IFM_Channels*INPUT_PRECISION> > & in, stream<ap_uint<INPUT_PRECISION> > & out, unsigned int numReps)
+{
 #pragma HLS DATAFLOW
-	ConvLayer_Batch_TMR<KERNEL_DIM,
-						IFM_Channels1,
-						IFMDim1,
-						OFM_Channels1,
-						OFMDim1,
-						SIMD1,
-						PE1,
-						NUM_RED,
-						REDF,
-						MAX_CH_WIDTH,
-						Slice<ap_uint<INPUT_PRECISION> >,
-						Slice<ap_int<ACTIVATION_PRECISION> >,
-						Identity >
-	(in, out, PARAM::weights, PassThroughActivation<ap_uint<ACTIVATION_PRECISION>>(), numReps, ap_resource_dsp(), errortype, PARAM::channel_mask, PARAM::red_ch_index);
+stream<ap_uint<SIMD*INPUT_PRECISION> > in_simd("in_simd");
+stream<ap_uint<SIMD*INPUT_PRECISION> > out_simd("out_simd");
+StreamingDataWidthConverter_Batch<IFM_Channels*INPUT_PRECISION, SIMD*INPUT_PRECISION, IFMDim*IFMDim>(in, in_simd, numReps);
+
+
+ConvolutionInputGeneratorPruned<KERNEL_DIM,
+	IFM_Channels,
+	INPUT_PRECISION,
+	IFMDim,
+	OFMDim,
+	SIMD,
+	STRIDE
+	>(in_simd, out_simd, numReps, PARAM::ColsToPrune, ap_resource_dflt());
+
+StreamingDataWidthConverter_Batch<SIMD*INPUT_PRECISION, INPUT_PRECISION, OFMDim*OFMDim* (KERNEL_DIM*KERNEL_DIM*IFM_Channels/SIMD - NumColPruned) >(out_simd, out, numReps);
+
 }
+
+

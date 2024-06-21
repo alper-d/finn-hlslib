@@ -55,7 +55,6 @@
 
 #include "mac.hpp"
 #include "interpret.hpp"
-#include "weights.hpp"
 
 /**
  * \brief Matrix vector activate function
@@ -121,7 +120,7 @@ void Matrix_Vector_Activate_Batch(hls::stream<TI> &in,
   // of smaller nested loops) to get the pipelinening the way we want
   unsigned const TOTAL_FOLD = NF * SF;
   for(unsigned  i = 0; i < reps * TOTAL_FOLD; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
     TI  inElem;
     if(nf == 0) {
       // read input from stream
@@ -247,7 +246,7 @@ void Matrix_Vector_Activate_Stream_Batch(hls::stream<TI> &in,
   // of smaller nested loops) to get the pipelinening the way we want
   unsigned const TOTAL_FOLD = NF * SF;
   for(unsigned  i = 0; i < reps * TOTAL_FOLD; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
     TI  inElem;
 
     if(nf == 0) {

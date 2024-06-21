@@ -54,11 +54,9 @@ void Testbench_kernel_stride_pool(stream<ap_uint<FM_Channels1*INPUT_PRECISION> >
     hls::stream<ap_uint<PE1*INPUT_PRECISION> > swg_out("swg_out");
     hls::stream<ap_uint<PE1*INPUT_PRECISION> > pool_out("pool_out");
 
-    FMPadding_Batch<
-        IFMDim1, PoolInDim1,
-        PADDING/2+PADDING%2, PADDING/2,
-        FM_Channels1, FM_Channels1, ap_uint<INPUT_PRECISION>
-    >(in, padded_input, numReps);
+
+    FMPadding_Batch<IFMDim1,PoolInDim1,PADDING,FM_Channels1,FM_Channels1,ap_uint<INPUT_PRECISION> >
+        (in,padded_input, numReps) ;
 
     StreamingDataWidthConverter_Batch<FM_Channels1*INPUT_PRECISION, 
                                         PE1*INPUT_PRECISION, (PoolInDim1)*(PoolInDim1)>
@@ -69,7 +67,7 @@ void Testbench_kernel_stride_pool(stream<ap_uint<FM_Channels1*INPUT_PRECISION> >
             (aw_padded_input, swg_out, numReps, ap_resource_dflt());
 
     MaxPoolFunction<ap_uint<INPUT_PRECISION>,KERNEL_DIM> maxpool_fxn;
-    Pool_batch<FM_Channels1, PE1, KERNEL_DIM*KERNEL_DIM,
+    Pool_batch<FM_Channels1, PE1, KERNEL_DIM,
                 Slice<ap_uint<INPUT_PRECISION> >, Slice< ap_uint<INPUT_PRECISION> > >
     (swg_out,pool_out, maxpool_fxn, OFMDim1*OFMDim1*numReps);
 

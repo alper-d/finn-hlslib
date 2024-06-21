@@ -28,12 +28,13 @@
 .. ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ====================================
-dma.h
+fclayer.h
 ====================================
 
-The dma.h file describes the HLS blocks used to communicate between programmable logic and host arm processor in Zynq and Zynq Ultrascale+ devices.  
+The fclayer.h file describes the HLS implementation of the fully connected layer. 
 
-.. doxygenfile:: dma.h
+
+.. doxygenfile:: fclayer.h
 
 
 

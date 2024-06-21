@@ -32,11 +32,10 @@
 /******************************************************************************
  *
  *  Authors: Giulio Gambardella <giuliog@xilinx.com>
- *           Felix Jentzsch <felixj@xilinx.com>
  *
  *  \file pool_top.cpp
  *
- *  HLS Top functions for HLS square/1d max pool block unit testing
+ *  HLS Top function with a single HLS max pool block unit testing
  *
  *****************************************************************************/
 #include <hls_stream.h>
@@ -45,19 +44,8 @@ using namespace hls;
 #include "bnn-library.h"
 
 
-#include "data/pool_config.h"
-
-void Testbench_pool_binary(stream<ap_uint<FM_Channels1> > & in, stream<ap_uint<FM_Channels1> > & out, unsigned int numReps){
-#pragma HLS DATAFLOW
-	StreamingMaxPool_Batch<IFMDim1, KERNEL_DIM, FM_Channels1>(in, out, numReps);
-}
+#include "pool_config.h"
 
 void Testbench_pool(stream<ap_uint<FM_Channels1*PRECISION> > & in, stream<ap_uint<FM_Channels1*PRECISION> > & out, unsigned int numReps){
-#pragma HLS DATAFLOW
 	StreamingMaxPool_Precision_Batch<IFMDim1, KERNEL_DIM, FM_Channels1, ap_uint<PRECISION>, 0>(in, out, numReps);
-}
-
-void Testbench_pool_1d(stream<ap_uint<PE1*PRECISION> > & in, stream<ap_uint<PE1*PRECISION> > & out, unsigned int numReps){
-#pragma HLS DATAFLOW
-	StreamingMaxPool_Precision_1d<IFMDim1, KERNEL_DIM, FM_Channels1, PE1, OFMDim1, ap_uint<PRECISION>, 0>(in, out);
 }

@@ -113,7 +113,7 @@ template<typename TC, typename TD>
 auto mul(TC const &c, TD const &d, ap_resource_lut const&) -> decltype(c*d) {
 #pragma HLS inline
   decltype(c*d) const  res = c*d;
-#pragma HLS BIND_OP variable=res op=mul impl=fabric
+#pragma HLS RESOURCE variable=res core=Mul_LUT
   return  res;
 }
 
@@ -139,7 +139,7 @@ template<typename TC, typename TD>
 auto mul(TC const &c, TD const &d, ap_resource_dsp const&) -> decltype(c*d) {
 #pragma HLS inline
   decltype(c*d) const  res = c*d;
-#pragma HLS BIND_OP variable=res op=mul impl=dsp
+#pragma HLS RESOURCE variable=res core=DSP48
   return  res;
 }
 

@@ -1,5 +1,5 @@
 /******************************************************************************
- *  Copyright (c) 2021, Xilinx, Inc.
+ *  Copyright (c) 2019, Xilinx, Inc.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -29,12 +29,44 @@
  *  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+/******************************************************************************
+ *
+ *  Authors: Giulio Gambardella <giuliog@xilinx.com>
+ *
+ *  \file input_gen.cpp
+ *
+ *  HLS Top function with a single HLS sliding-window generator block unit testing
+ *
+ *****************************************************************************/
+#include <hls_stream.h>
+using namespace hls;
+#include "ap_int.h"
+#include "bnn-library.h"
 
-#define SIMD1 1
-#define KERNEL_DIM_x 5
-#define IFM_Channels1 12
-#define IFMDim_x 20
-#define OFMDim_x 16
-#define STRIDE_x 1
-#define DILATION_x 1
-#define INPUT_PRECISION1 16
+// new/changed includes
+#include "input_gen_SIMD_pruned.h"
+
+
+void Testbench(stream<ap_uint<IFM_Channels*INPUT_PRECISION> > & in, stream<ap_uint<INPUT_PRECISION> > & out, unsigned int numReps)
+{
+#pragma HLS DATAFLOW
+stream<ap_uint<SIMD_in*INPUT_PRECISION> > in_simd("in_simd");
+stream<ap_uint<SIMD_out*INPUT_PRECISION> > out_simd("out_simd");
+StreamingDataWidthConverter_Batch<IFM_Channels*INPUT_PRECISION, SIMD_in*INPUT_PRECISION, IFMDim*IFMDim>(in, in_simd, numReps);
+
+ConvolutionInputGeneratorSIMDPruned<KERNEL_DIM,
+	IFM_Channels,
+	INPUT_PRECISION,
+	IFMDim,
+	OFMDim,
+	SIMD_in,
+    SIMD_out,
+	STRIDE
+	>(in_simd, out_simd, numReps, PARAM::SIMD_pruning_mask, ap_resource_dflt());
+
+StreamingDataWidthConverter_Batch<SIMD_out*INPUT_PRECISION, INPUT_PRECISION, OFMDim*OFMDim* (KERNEL_DIM*KERNEL_DIM*IFM_Channels/SIMD_in)>(out_simd, out, numReps);
+//Old pruning: StreamingDataWidthConverter_Batch<SIMD_out*INPUT_PRECISION, INPUT_PRECISION, OFMDim*OFMDim* (KERNEL_DIM*KERNEL_DIM*IFM_Channels/SIMD - NumColPruned) >(out_simd, out, numReps);
+
+}
+
+

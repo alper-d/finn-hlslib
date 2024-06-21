@@ -49,7 +49,6 @@
 #define INTERPRET_HPP
 
 #include <ap_int.h>
-#include <ostream>
 
 /**
  * Thin wrapper around an ap_uint<1> redefining multiplication with
@@ -76,7 +75,7 @@ inline int operator*(ap_uint<1> const &a, XnorMul const &b) {
 class Binary {
  public:
   ap_uint<1> const  m_val;
-  explicit Binary(ap_uint<1> const  val) : m_val(val) {
+  Binary(ap_uint<1> const  val) : m_val(val) {
 #pragma HLS inline
   }
 
@@ -147,7 +146,7 @@ class Recast {
 #pragma HLS inline
       return  m_val[idx];
     }
-    T operator()(unsigned const idx, __attribute__((unused)) unsigned const mmv) const {
+    T operator()(unsigned const idx, unsigned const mmv) const {
 #pragma HLS inline
       return  T(m_val[idx]);
     }
@@ -164,7 +163,7 @@ class Recast {
     return  Container<TV>(val);
   }
   template<typename TV>
-  Container<TV> operator()(TV const &val, __attribute__((unused)) unsigned const mmv) const {
+  Container<TV> operator()(TV const &val, unsigned const mmv) const {
 #pragma HLS inline
     return  Container<TV>(val);
   }
@@ -185,7 +184,7 @@ template<int W, int I, ap_q_mode Q, ap_o_mode O, int N>
 struct Caster<ap_fixed<W, I, Q, O, N>> {
   template<int M>
   static ap_fixed<W, I, Q, O, N> cast(ap_int<M> const &arg) {
-    return  ap_fixed<W, I, Q, O, N>(arg);
+    return *reinterpret_cast<ap_fixed<W, I, Q, O, N> const*>(&arg);
   }
 }; 
 
@@ -207,16 +206,16 @@ class Slice {
 #pragma HLS inline
     }
    public:
-    auto operator()(unsigned const idx, __attribute__((unused)) unsigned const mmv, __attribute__((unused)) bool const flag) const -> decltype(m_val(STRIDE, 0)) {
+    auto operator()(unsigned const idx, unsigned const mmv, const bool flag) const -> decltype(m_val(STRIDE, 0)) {
 #pragma HLS inline
       return  m_val((idx+1)*STRIDE-1, idx*STRIDE);
     }
-    T operator()(unsigned const idx, __attribute__((unused)) unsigned const mmv) const {
+    T operator()(unsigned const idx, unsigned const mmv) const {
 #pragma HLS inline
       ap_uint<STRIDE> const  r = m_val((idx+1)*STRIDE-1, idx*STRIDE);
       return  Caster<T>::cast(ap_int<STRIDE>(r));
     }
-    auto operator[](__attribute__((unused)) unsigned mmv) const -> decltype(m_val) {
+    auto operator[](unsigned mmv) const -> decltype(m_val) {
 #pragma HLS inline
       return  m_val;
     }
@@ -238,7 +237,7 @@ class Slice {
     return  Container<TV>();
   }
   template<typename TV>
-  Container<TV> operator() (TV const &val, __attribute__((unused)) unsigned mmv) const {
+  Container<TV> operator() (TV const &val, unsigned mmv) const {
 #pragma HLS inline
     return  Container<TV>(val);
   }
@@ -260,7 +259,7 @@ class Slice_mmv {
     Container() {
 #pragma HLS inline
     }
-    Container(TV const &val, __attribute__((unused)) unsigned mmv) : m_val(val){
+    Container(TV const &val, unsigned mmv) : m_val(val){
 #pragma HLS inline
     }
     Container(TV const &val) : m_val(val){
@@ -271,7 +270,7 @@ class Slice_mmv {
 #pragma HLS inline
       return  m_val;
     };
-    auto operator()(unsigned const idx, unsigned const mmv, __attribute__((unused)) bool const flag) const -> decltype(m_val.data[mmv](STRIDE, 0)) {
+    auto operator()(unsigned const idx, unsigned const mmv, const bool flag) const -> decltype(m_val.data[mmv](STRIDE, 0)) {
 #pragma HLS inline
       return  m_val.data[mmv]((idx+1)*STRIDE-1, idx*STRIDE);
     };
@@ -298,7 +297,7 @@ class Slice_mmv {
     return  Container<TV>();
   }
   template<typename TV>
-  Container<TV> operator()(TV const &val, __attribute__((unused)) unsigned mmv)  {
+  Container<TV> operator()(TV const &val, unsigned mmv)  {
 #pragma HLS inline
     return  Container<TV>(val);
   }

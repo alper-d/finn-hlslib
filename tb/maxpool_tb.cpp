@@ -44,12 +44,12 @@
 #include <cstring>
 #include <hls_stream.h>
 #include <cstdlib>
-#define AP_INT_MAX_W 8191
+#define AP_INT_MAX_W 16384
 #include "ap_int.h"
 #include "weights.hpp"
 #include "bnn-library.h"
 
-#include "data/pool_config.h"
+#include "pool_config.h"
 #include "pool_tb.hpp"
 #include "activations.hpp"
 #include "interpret.hpp"

@@ -71,10 +71,10 @@ template<unsigned int DataWidth,
 >
 void StreamLimiter(hls::stream<ap_uint<DataWidth> > & in,
 		hls::stream<ap_uint<DataWidth> > & out) {
-  static_assert(NumTotal >= NumAllowed, "");
+  CASSERT_DATAFLOW(NumTotal >= NumAllowed);
   unsigned int numLeft = NumAllowed;
   for (unsigned int i = 0; i < NumTotal; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
     ap_uint<DataWidth> e = in.read();
     if (numLeft > 0) {
       out.write(e);
@@ -134,8 +134,8 @@ template<	unsigned int ImgDim,
 			unsigned int NumChannels,
 			typename In_t,
       unsigned int PaddingStyle=2>
-void SameResize(hls::stream<ap_uint<NumChannels* In_t::width> > &in,
-		hls::stream<ap_uint<NumChannels* In_t::width> > &out){
+void SameResize(stream<ap_uint<NumChannels* In_t::width> > &in, 
+		stream<ap_uint<NumChannels* In_t::width> > &out){
 
 	// Number of "same" windows over the input data
 	constexpr unsigned int SameWindows = (ImgDim) / Stride + ((ImgDim % Stride) > 0);
@@ -157,7 +157,7 @@ void SameResize(hls::stream<ap_uint<NumChannels* In_t::width> > &in,
 
 	for(unsigned int y = 0; y<OutputDim; y++){
 		for(unsigned int x=0; x < OutputDim; x++){
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1				
 
 			// Padding Rows
 			if(y < PaddingUp || y >= (OutputDim - PaddingDown)){
@@ -203,8 +203,8 @@ template<	unsigned int ImgDim,
 			unsigned int NumChannels,
 			typename In_t,
       unsigned int PaddingStyle=2>
-void SameResize_Batch(hls::stream<ap_uint<NumChannels* In_t::width> > &in,
-		hls::stream<ap_uint<NumChannels* In_t::width> > &out,
+void SameResize_Batch(stream<ap_uint<NumChannels* In_t::width> > &in, 
+		stream<ap_uint<NumChannels* In_t::width> > &out, 
 		const unsigned int numReps) {
 	for (unsigned int rep = 0; rep < numReps; rep++) {
 		SameResize<ImgDim, KernelDim, Stride, NumChannels, In_t, PaddingStyle>(in, out);
@@ -231,7 +231,7 @@ void SameResize_Batch(hls::stream<ap_uint<NumChannels* In_t::width> > &in,
 template<typename InT, typename OutT>
 void StreamingCast(hls::stream<InT> & in, hls::stream<OutT> & out, unsigned int numReps) {
   for(unsigned int i = 0; i < numReps; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
     out.write((OutT) in.read());
   }
 }
@@ -240,54 +240,166 @@ void StreamingCast(hls::stream<InT> & in, hls::stream<OutT> & out, unsigned int 
  * \brief   FM Padding - Padds the input with zeroes for when the sliding window is
  *          centered on border pixels
  *
+ * Used to add padding to the input with zeroes in case the sliding window is
+ * centered on border pixels
+ *
+ * \tparam	ImgDim		Size of the input feature map
+ * \tparam	OutputDim		Size of the output feature map
+ * \tparam	Padding		Amount of padding in total
+ * \tparam	NumChannels	Amount of channels of the input feature map
+ * \tparam	SIMD			Input parallelism 
+ * \tparam	In_t			Input datatype
+ * \tparam	PaddingStyle	Type of padding that will be applied
+ *
+ * \param		in			Input stream
+ * \param		out			Output stream
+ *
+ */
+template<	unsigned int ImgDim,
+			unsigned int OutputDim,
+			unsigned int Padding,
+			unsigned int NumChannels,
+			unsigned int SIMD,			
+			typename In_t,
+      unsigned int PaddingStyle=2>
+void FMPadding(stream<ap_uint<SIMD* In_t::width> > &in,
+		stream<ap_uint<SIMD* In_t::width> > &out){
+
+
+	// Padding Up and Left
+  constexpr unsigned int PaddingUp = Padding/2 + ((PaddingStyle == 2) ? ((Padding % 2) > 0) : 0);
+  constexpr unsigned int PaddingLeft = Padding/2 + ((PaddingStyle == 2) ? ((Padding % 2) > 0) : 0);
+
+	// Padding Down and Right (might be 1 element more than up and left in case of odd padding)
+	constexpr unsigned int PaddingDown = Padding - PaddingUp;
+	constexpr unsigned int PaddingRight = Padding - PaddingLeft;
+	constexpr unsigned int Folding = NumChannels/SIMD;
+	ap_uint<SIMD* In_t::width> outData, inData;
+
+	for(unsigned int y = 0; y<OutputDim; y++){
+		for(unsigned int x=0; x < OutputDim; x++){
+			for(unsigned int simd=0; simd < Folding; simd++) {
+#pragma HLS PIPELINE II=1
+
+			// Padding Rows
+			if(y < PaddingUp || y >= (OutputDim - PaddingDown)){
+				outData = 0;
+			}
+			// Padding Cols
+			else if(x < PaddingLeft || x >= (OutputDim - PaddingRight)){
+				outData = 0;
+			}
+			// No Padding
+			else{
+				inData = in.read();
+				outData = inData;
+			}
+
+			out.write(outData);
+			}
+		}
+	}
+}
+
+/**
+ * \brief   FM Padding - Padds the input of multiple frames with zeroes
+ *          for when the sliding window is centered on border pixels
+ *
+ * Used to add padding with zeroes to multiple inputs in case the sliding window is
+ * centered on border pixels
+ *
+ * \tparam	ImgDim		Size of the input feature map
+ * \tparam	OutputDim		Size of the output feature map
+ * \tparam	Padding		Amount of padding in total
+ * \tparam	NumChannels	Amount of channels of the input feature map
+ * \tparam	SIMD			Input parallelism 
+ * \tparam	In_t			Input datatype
+ * \tparam	PaddingStyle	Type of padding that will be applied
+ *
+ * \param		in			Input stream
+ * \param		out			Output stream
+ * \param		numReps		Amount of frames / images
+ *
+ */
+template<	unsigned int ImgDim,
+			unsigned int OutputDim,
+			unsigned int Padding,
+			unsigned int NumChannels,
+			unsigned int SIMD,
+			typename In_t,
+      unsigned int PaddingStyle=2>
+void FMPadding_Batch(stream<ap_uint<SIMD* In_t::width> > &in,
+		stream<ap_uint<SIMD* In_t::width> > &out,
+		const unsigned int numReps) {
+	for (unsigned int rep = 0; rep < numReps; rep++) {
+		FMPadding<ImgDim, OutputDim, Padding, NumChannels, SIMD, In_t, PaddingStyle>(in, out);
+	}
+
+}
+
+
+/**
+ * \brief   FM Padding - Padds the input with zeroes for when the sliding window is
+ *          centered on border pixels
+ *
  * Used to add padding with zeroes to multiple inputs in case the sliding window is
  * centered on border pixels - working on non-square images and padding
  *
- * \tparam	OutputDim_x	Padded width of the output feature map
- * \tparam	OutputDim_y	Padded height of the output feature map
- * \tparam	PaddingLeft		Left image padding on x-axis
- * \tparam	PaddingRight	Right image padding on x-axis
- * \tparam	PaddingTop		Top image padding on y-axis
- * \tparam	PaddingBottom	Bottom image padding on y-axis
- * \tparam	NumChannels		Number of channels of the input feature map
+ * \tparam	OutputDim_x	Width of the output feature map (padded)
+ * \tparam	OutputDim_y	Height of the output feature map (padded)
+ * \tparam	Padding_x	Amount of padding over x axis
+ * \tparam	Padding_y	Amount of padding over y axis
+ * \tparam	NumChannels	Amount of channels of the input feature map
  * \tparam	SIMD			Input parallelism 
  * \tparam	In_t			Input datatype
+ * \tparam	PaddingStyle	Type of padding that will be applied
  *
- * \param	in		Input stream
- * \param	out		Output stream
+ * \param		in			Input stream
+ * \param		out			Output stream
+ *
  */
-template<
-	unsigned  OutputDim_x,
-	unsigned  OutputDim_y,
-	unsigned  PaddingLeft,
-	unsigned  PaddingRight,
-	unsigned  PaddingTop,
-	unsigned  PaddingBottom,
-	unsigned  NumChannels,
-	unsigned  SIMD,
-	typename  In_t
->
-void FMPadding_nonsquare(
-	hls::stream<ap_uint<SIMD*In_t::width>> &in,
-	hls::stream<ap_uint<SIMD*In_t::width>> &out
-){
-	static_assert(NumChannels%SIMD == 0, "Channel count must be a SIMD multiple.");
-	constexpr unsigned  Folding = NumChannels/SIMD;
+template<	unsigned int OutputDim_x,
+			unsigned int OutputDim_y,
+			unsigned int Padding_x,
+			unsigned int Padding_y,
+			unsigned int NumChannels,
+			unsigned int SIMD,			
+			typename In_t,
+      unsigned int PaddingStyle=2>
+void FMPadding_nonsquare(stream<ap_uint<SIMD* In_t::width> > &in,
+		stream<ap_uint<SIMD* In_t::width> > &out){
 
-	for(unsigned  y = 0; y < OutputDim_y; y++) {
-		for(unsigned  x = 0; x < OutputDim_x; x++) {
-			for(unsigned  sf = 0; sf < Folding; sf++) {
-#pragma HLS pipeline style=flp II=1
-				ap_uint<SIMD*In_t::width>  outData = 0;
 
-				// Read & forward real data only for non-padding image kernel
-				if(
-					/* rows */ (PaddingTop  <= y) && (y < OutputDim_y - PaddingBottom) &&
-					/* cols */ (PaddingLeft <= x) && (x < OutputDim_x - PaddingRight)
-				) {
-					outData = in.read();
-				}
-				out.write(outData);
+	// Padding Up and Left
+  constexpr unsigned int PaddingUp = Padding_y/2 + ((PaddingStyle == 2) ? ((Padding_y % 2) > 0) : 0);
+  constexpr unsigned int PaddingLeft = Padding_x/2 + ((PaddingStyle == 2) ? ((Padding_x % 2) > 0) : 0);
+
+	// Padding Down and Right (might be 1 element more than up and left in case of odd padding)
+	constexpr unsigned int PaddingDown = Padding_y - PaddingUp;
+	constexpr unsigned int PaddingRight = Padding_x - PaddingLeft;
+	constexpr unsigned int Folding = NumChannels/SIMD;
+	ap_uint<SIMD* In_t::width> outData, inData;
+
+	for(unsigned int y = 0; y<OutputDim_y; y++){
+		for(unsigned int x=0; x < OutputDim_x; x++){
+			for(unsigned int simd=0; simd < Folding; simd++) {
+#pragma HLS PIPELINE II=1
+
+			// Padding Rows
+			if(y < PaddingUp || y >= (OutputDim_y - PaddingDown)){
+				outData = 0;
+			}
+			// Padding Cols
+			else if(x < PaddingLeft || x >= (OutputDim_x - PaddingRight)){
+				outData = 0;
+			}
+			// No Padding
+			else{
+				inData = in.read();
+				outData = inData;
+			}
+
+			out.write(outData);
 			}
 		}
 	}
@@ -300,122 +412,37 @@ void FMPadding_nonsquare(
  * Used to add padding with zeroes to multiple inputs in case the sliding window is
  * centered on border pixels - working on non-square images and padding
  *
- * \tparam	OutputDim_x	Padded width of the output feature map
- * \tparam	OutputDim_y	Padded height of the output feature map
- * \tparam	PaddingLeft		Left image padding on x-axis
- * \tparam	PaddingRight	Right image padding on x-axis
- * \tparam	PaddingTop		Top image padding on y-axis
- * \tparam	PaddingBottom	Bottom image padding on y-axis
- * \tparam	NumChannels		Number of channels of the input feature map
+ * \tparam	OutputDim_x	Width of the output feature map (padded)
+ * \tparam	OutputDim_y	Height of the output feature map (padded)
+ * \tparam	Padding_x	Amount of padding over x axis
+ * \tparam	Padding_y	Amount of padding over y axis
+ * \tparam	NumChannels	Amount of channels of the input feature map
  * \tparam	SIMD			Input parallelism 
  * \tparam	In_t			Input datatype
+ * \tparam	PaddingStyle	Type of padding that will be applied
  *
- * \param	in		Input stream
- * \param	out		Output stream
- * \param	numReps	Number of frames / images
+ * \param		in			Input stream
+ * \param		out			Output stream
+ * \param		numReps		Amount of frames / images
+ *
  */
-template<
-	unsigned  OutputDim_x,
-	unsigned  OutputDim_y,
-	unsigned  PaddingLeft,
-	unsigned  PaddingRight,
-	unsigned  PaddingTop,
-	unsigned  PaddingBottom,
-	unsigned  NumChannels,
-	unsigned  SIMD,
-	typename  In_t
->
-void FMPadding_nonsquare_Batch(
-	hls::stream<ap_uint<SIMD*In_t::width>> &in,
-	hls::stream<ap_uint<SIMD*In_t::width>> &out,
-	unsigned const  numReps
-) {
+template<	unsigned int OutputDim_x,
+			unsigned int OutputDim_y,
+			unsigned int Padding_x,
+			unsigned int Padding_y,
+			unsigned int NumChannels,
+			unsigned int SIMD,
+			typename In_t,
+      unsigned int PaddingStyle=2>
+void FMPadding_nonsquare_Batch(stream<ap_uint<SIMD* In_t::width> > &in,
+		stream<ap_uint<SIMD* In_t::width> > &out,
+		const unsigned int numReps) {
 	for (unsigned int rep = 0; rep < numReps; rep++) {
-		FMPadding_nonsquare<
-			OutputDim_x, OutputDim_y,
-			PaddingLeft, PaddingRight, PaddingTop, PaddingBottom,
-			NumChannels, SIMD, In_t
-		>(in, out);
+		FMPadding_nonsquare<OutputDim_x, OutputDim_y, Padding_x, Padding_y, NumChannels, SIMD, In_t, PaddingStyle>(in, out);
 	}
+
 }
 
-/**
- * \brief   FM Padding - Padds the input with zeroes for when the sliding window is
- *          centered on border pixels
- *
- * Used to add padding to the input with zeroes in case the sliding window is
- * centered on border pixels
- *
- * \tparam	ImgDim			<ignored>
- * \tparam	OutputDim		Size of the output feature map
- * \tparam	PaddingBefore	Top / left padding
- * \tparam	PaddingBehind	Bottom / right padding
- * \tparam	NumChannels		Number of channels of the input feature map
- * \tparam	SIMD			Input parallelism 
- * \tparam	In_t			Input datatype
- *
- * \param	in	Input stream
- * \param	out	Output stream
- *
- */
-template<
-	unsigned  ImgDim,
-	unsigned  OutputDim,
-	unsigned  PaddingBefore,
-	unsigned  PaddingBehind,
-	unsigned  NumChannels,
-	unsigned  SIMD,
-	typename  In_t
->
-void FMPadding(
-	hls::stream<ap_uint<SIMD*In_t::width>> &in,
-	hls::stream<ap_uint<SIMD*In_t::width>> &out
-){
-#pragma HLS inline
-	FMPadding_nonsquare<
-		OutputDim, OutputDim,
-		PaddingBefore, PaddingBehind, PaddingBefore, PaddingBehind,
-		NumChannels, SIMD, In_t
-	>(in, out);
-}
-
-/**
- * \brief   FM Padding - Padds the input of multiple frames with zeroes
- *          for when the sliding window is centered on border pixels
- *
- * Used to add padding with zeroes to multiple inputs in case the sliding window is
- * centered on border pixels
- *
- * \tparam	ImgDim			<ignored>
- * \tparam	OutputDim		Size of the output feature map
- * \tparam	PaddingBefore	Top / left padding
- * \tparam	PaddingBehind	Bottom / right padding
- * \tparam	NumChannels		Number of channels of the input feature map
- * \tparam	SIMD			Input parallelism 
- * \tparam	In_t			Input datatype
- *
- * \param	in	Input stream
- * \param	out	Output stream
- * \param	numReps	Number of frames / images
- */
-template<
-	unsigned  ImgDim,
-	unsigned  OutputDim,
-	unsigned  PaddingBefore,
-	unsigned  PaddingBehind,
-	unsigned  NumChannels,
-	unsigned  SIMD,
-	typename  In_t
->
-void FMPadding_Batch(
-	hls::stream<ap_uint<SIMD*In_t::width>> &in,
-	hls::stream<ap_uint<SIMD*In_t::width>> &out,
-	unsigned const  numReps
-) {
-	for (unsigned int rep = 0; rep < numReps; rep++) {
-		FMPadding<ImgDim, OutputDim, PaddingBefore, PaddingBehind, NumChannels, SIMD, In_t>(in, out);
-	}
-}
 
 /**
  * \brief   Stream Data Width Converter - Converts the width of the input stream in the output stream
@@ -439,16 +466,15 @@ template<unsigned int InWidth,
 >
 void StreamingDataWidthConverter_Batch(hls::stream<ap_uint<InWidth> > & in,
 		hls::stream<ap_uint<OutWidth> > & out, const unsigned int numReps) {
-  static_assert((InWidth % OutWidth == 0) || (OutWidth % InWidth == 0), "");
-
   if (InWidth > OutWidth) {
     // emit multiple output words per input word read
+    CASSERT_DATAFLOW(InWidth % OutWidth == 0);
     const unsigned int outPerIn = InWidth / OutWidth;
     const unsigned int totalIters = NumInWords * outPerIn * numReps;
     unsigned int o = 0;
     ap_uint<InWidth> ei = 0;
     for (unsigned int t = 0; t < totalIters; t++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
       // read new input word if current out count is zero
       if (o == 0) {
         ei = in.read();
@@ -468,18 +494,19 @@ void StreamingDataWidthConverter_Batch(hls::stream<ap_uint<InWidth> > & in,
   } else if (InWidth == OutWidth) {
     // straight-through copy
     for (unsigned int i = 0; i < NumInWords * numReps; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
       ap_uint<InWidth> e = in.read();
       out.write(e);
     }
   } else { // InWidth < OutWidth
     // read multiple input words per output word emitted
+    CASSERT_DATAFLOW(OutWidth % InWidth == 0);
     const unsigned int inPerOut = OutWidth / InWidth;
     const unsigned int totalIters = NumInWords * numReps;
     unsigned int i = 0;
     ap_uint<OutWidth> eo = 0;
     for (unsigned int t = 0; t < totalIters; t++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
       // read input and shift into output buffer
       ap_uint<InWidth> ei = in.read();
       eo = eo >> InWidth;
@@ -516,9 +543,9 @@ template<
 void StreamingDataWidthConverterNoMultiple(
     hls::stream<ap_uint<InWidth> > & in,
     hls::stream<ap_uint<OutWidth> > & out) {
-    static_assert((InWidth % 2) == 0, "");
-    static_assert((OutWidth % 2) == 0, "");
-    static_assert(InWidth != OutWidth, "");
+    CASSERT_DATAFLOW((InWidth % 2) == 0);
+    CASSERT_DATAFLOW((OutWidth % 2) == 0);
+    CASSERT_DATAFLOW(InWidth != OutWidth);
     static unsigned int      offset = 0; 
 
     if (InWidth > OutWidth){
@@ -584,11 +611,11 @@ void StreamingDataWidthConverterNoMultiple(
 template<unsigned int DataWidth,
 		unsigned int NumTotal
 >
-void DuplicateStreams(hls::stream<ap_uint<DataWidth> > & in, hls::stream<ap_uint<DataWidth> > & out1,
-		hls::stream<ap_uint<DataWidth> > & out2) {
+void DuplicateStreams(stream<ap_uint<DataWidth> > & in, stream<ap_uint<DataWidth> > & out1,
+		stream<ap_uint<DataWidth> > & out2) {
 	
 	for (unsigned int i = 0; i < NumTotal; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1		
 		ap_uint<DataWidth> e = in.read();
 		
 		out1.write(e);
@@ -613,8 +640,8 @@ void DuplicateStreams(hls::stream<ap_uint<DataWidth> > & in, hls::stream<ap_uint
 template<unsigned int DataWidth,
 		unsigned int NumTotal
 >
-void DuplicateStreams_Batch(hls::stream<ap_uint<DataWidth> > & in, hls::stream<ap_uint<DataWidth> > & out1,
-		hls::stream<ap_uint<DataWidth> > & out2, const unsigned int numReps) {
+void DuplicateStreams_Batch(stream<ap_uint<DataWidth> > & in, stream<ap_uint<DataWidth> > & out1,
+		stream<ap_uint<DataWidth> > & out2, const unsigned int numReps) {	
 	for (unsigned int image = 0; image < numReps; image++) {
 		DuplicateStreams<DataWidth, NumTotal>(in, out1, out2);
 	}
@@ -642,11 +669,11 @@ template <unsigned int NumChannels,
           typename Out_t,
           unsigned int NumTotal, 
           int offset = 0>
-void AddStreams(hls::stream<ap_uint<NumChannels * In1_t::width>> &in1, hls::stream<ap_uint<NumChannels * In2_t::width>> &in2,
-                hls::stream<ap_uint<NumChannels * Out_t::width>> &out) {
+void AddStreams(stream<ap_uint<NumChannels * In1_t::width>> &in1, stream<ap_uint<NumChannels * In2_t::width>> &in2,
+                stream<ap_uint<NumChannels * Out_t::width>> &out) {
 
   for (unsigned int i = 0; i < NumTotal; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II = 1
     ap_uint<NumChannels * In1_t::width> e1 = in1.read();
     ap_uint<NumChannels * In2_t::width> e2 = in2.read();
     ap_uint<NumChannels * Out_t::width> e;
@@ -686,8 +713,8 @@ template <unsigned int NumChannels,
           typename Out_t,
           unsigned int NumTotal,
           int offset = 0>
-void AddStreams_Batch(hls::stream<ap_uint<NumChannels * In1_t::width>> &in1, hls::stream<ap_uint<NumChannels * In2_t::width>> &in2,
-                hls::stream<ap_uint<NumChannels * Out_t::width>> &out, const unsigned int numReps) {
+void AddStreams_Batch(stream<ap_uint<NumChannels * In1_t::width>> &in1, stream<ap_uint<NumChannels * In2_t::width>> &in2,
+                stream<ap_uint<NumChannels * Out_t::width>> &out, const unsigned int numReps) {
   for (unsigned int image = 0; image < numReps; image++) {
     AddStreams<NumChannels, In1_t, In2_t, Out_t, NumTotal, offset>(in1, in2, out);
   }
@@ -718,13 +745,13 @@ template <unsigned int NumChannels,
           unsigned int NumTotal,
           unsigned int PECount, 
           int offset = 0>
-void AddStreamsLayer_Batch(hls::stream<ap_uint<NumChannels * In1_t::width>> &in1, hls::stream<ap_uint<NumChannels * In2_t::width>> &in2,
-                           hls::stream<ap_uint<NumChannels * Out_t::width>> &out, const unsigned int numReps) {
+void AddStreamsLayer_Batch(stream<ap_uint<NumChannels * In1_t::width>> &in1, stream<ap_uint<NumChannels * In2_t::width>> &in2,
+                           stream<ap_uint<NumChannels * Out_t::width>> &out, const unsigned int numReps) {
 #pragma HLS INLINE
-  static_assert(NumChannels % PECount == 0, "");
-  hls::stream<ap_uint<PECount * In1_t::width>> in_folded1;
-  hls::stream<ap_uint<PECount * In2_t::width>> in_folded2;
-  hls::stream<ap_uint<PECount * Out_t::width>> out_folded;
+  CASSERT_DATAFLOW(NumChannels % PECount == 0);
+  stream<ap_uint<PECount * In1_t::width>> in_folded1;
+  stream<ap_uint<PECount * In2_t::width>> in_folded2;
+  stream<ap_uint<PECount * Out_t::width>> out_folded;
   StreamingDataWidthConverter_Batch<NumChannels * In1_t::width, PECount * In1_t::width, NumTotal>(in1, in_folded1, numReps);
   StreamingDataWidthConverter_Batch<NumChannels * In2_t::width, PECount * In2_t::width, NumTotal>(in2, in_folded2, numReps);
   AddStreams_Batch<PECount, In1_t, In2_t, Out_t, NumTotal *(NumChannels / PECount),offset>(in_folded1, in_folded2, out_folded, numReps);
@@ -756,18 +783,18 @@ template<unsigned int InWidth,		// width of input stream
 		unsigned int NumVecs
 >
 void MultiChanDataWidthConverter_Batch(
-	hls::stream<MultiChanData<NumVecs, InWidth> > & in,
-	hls::stream<MultiChanData<NumVecs, OutWidth> > & out,
+	stream<MultiChanData<NumVecs, InWidth> > & in,
+	stream<MultiChanData<NumVecs, OutWidth> > & out,
 	const unsigned int numReps) {
-	static_assert((InWidth % OutWidth == 0) || (OutWidth % InWidth == 0), "");
 	if (InWidth > OutWidth) {
 		// emit multiple output words per input word read
+        CASSERT_DATAFLOW((InWidth % OutWidth) == 0);
 		const unsigned int outPerIn = InWidth / OutWidth;
 		const unsigned int totalIters = NumInWords * outPerIn * numReps;
 		unsigned int o = 0;
 		MultiChanData<NumVecs, InWidth> ei;
 		for (unsigned int t = 0; t < totalIters; t++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 			// read new input word if current out count is zero
 			if (o == 0)
 				ei = in.read();
@@ -790,7 +817,7 @@ void MultiChanDataWidthConverter_Batch(
 	} else if (InWidth == OutWidth) {
 		// straight-through copy
 		for (unsigned int i = 0; i < NumInWords * numReps; i++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 			MultiChanData<NumVecs, InWidth> e = in.read();
 			MultiChanData<NumVecs, OutWidth> eo;
 			// we don't support typecasting between templated types, so explicitly
@@ -803,12 +830,13 @@ void MultiChanDataWidthConverter_Batch(
 		}
 	} else { // InWidth < OutWidth
 		// read multiple input words per output word emitted
+		CASSERT_DATAFLOW((OutWidth % InWidth) == 0);
 		const unsigned int inPerOut = OutWidth / InWidth;
 		const unsigned int totalIters = NumInWords * numReps;
 		unsigned int i = 0;
 		MultiChanData<NumVecs, OutWidth> eo;
 		for (unsigned int t = 0; t < totalIters; t++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 			// read input and shift into output buffer
 			MultiChanData<NumVecs, InWidth> ei = in.read();
 			for(unsigned int v = 0; v < NumVecs; v++) {
@@ -843,12 +871,12 @@ void MultiChanDataWidthConverter_Batch(
  */
 template <unsigned int NumChannels, unsigned int DataWidth>
 void FlattenMultiChanData(
-	hls::stream<MultiChanData<NumChannels, DataWidth> > & in,
-	hls::stream<ap_uint<NumChannels*DataWidth> > & out,
+	stream<MultiChanData<NumChannels, DataWidth> > & in,
+	stream<ap_uint<NumChannels*DataWidth> > & out,
 	const unsigned int numReps
 ) {
 	for(unsigned int r = 0; r < numReps; r++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 		MultiChanData<NumChannels, DataWidth> e = in.read();
 		ap_uint<NumChannels*DataWidth> o = 0;
 		for(unsigned int v = 0; v < NumChannels; v++) {
@@ -874,12 +902,12 @@ void FlattenMultiChanData(
  */
 template <unsigned int NumChannels, unsigned int DataWidth>
 void PackMultiChanData(
-	hls::stream<ap_uint<NumChannels*DataWidth> > & in,
-	hls::stream<MultiChanData<NumChannels, DataWidth> > & out,
+	stream<ap_uint<NumChannels*DataWidth> > & in,
+	stream<MultiChanData<NumChannels, DataWidth> > & out,
 	const unsigned int numReps
 ) {
 	for(unsigned int r = 0; r < numReps; r++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 		ap_uint<NumChannels*DataWidth> e = in.read();
 		MultiChanData<NumChannels, DataWidth> o;
 		for(unsigned int v = 0; v < NumChannels; v++) {
@@ -912,7 +940,7 @@ template<unsigned W, unsigned N>
   hls::stream<ap_uint<W>> &m_source;
 
  public:
-  WidthAdjustedInputStream(hls::stream<ap_uint<W> >&  source, __attribute__((unused)) unsigned const  reps) : m_source(source) {}
+  WidthAdjustedInputStream(hls::stream<ap_uint<W> >&  source, unsigned const  reps) : m_source(source) {}
   ~WidthAdjustedInputStream() {}
 
  public:
@@ -944,7 +972,7 @@ template<unsigned W, unsigned N>
   hls::stream<ap_uint<W>> &m_target;
 
  public:
-  WidthAdjustedOutputStream(hls::stream<ap_uint<W> >&  target, __attribute__((unused)) unsigned const  reps)
+  WidthAdjustedOutputStream(hls::stream<ap_uint<W> >&  target, unsigned const  reps)
     : m_target(target) {}
   ~WidthAdjustedOutputStream() {}
 
@@ -969,10 +997,10 @@ template<unsigned W, unsigned N>
  */
 template<unsigned int DataWidth, unsigned int NumTotal>
 void Qdma2Stream_Batch(hls::stream<qdma_axis<DataWidth,0,0,0> > & in, hls::stream<ap_uint<DataWidth> > & out, const unsigned int numReps){
-	//TODO: static_assert to ensure DataWidth is power of 2 between 8 and 512
+	//TODO: CASSERT_DATAFLOW to ensure DataWidth is power of 2 between 8 and 512
 	for (unsigned int image = 0; image < numReps; image++) {
 		for (unsigned int word = 0; word < NumTotal; word++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 			out.write(in.read().get_data());
 		}
 	}
@@ -995,7 +1023,7 @@ template<unsigned int DataWidth, unsigned int NumTotal>
 void Stream2Qdma_Batch(hls::stream<ap_uint<DataWidth> > & in, hls::stream<qdma_axis<DataWidth,0,0,0> > & out, const unsigned int numReps){
 	for (unsigned int image = 0; image < numReps; image++) {
 		for (unsigned int word = 0; word < NumTotal; word++) {
-#pragma HLS pipeline style=flp II=1
+#pragma HLS PIPELINE II=1
 			qdma_axis<DataWidth,0,0,0> temp;
 			temp.set_data(in.read());
 			temp.set_keep(-1);

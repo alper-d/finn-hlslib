@@ -44,12 +44,12 @@
 #include <cstring>
 #include <hls_stream.h>
 #include <cstdlib>
-#define AP_INT_MAX_W 8191
+#define AP_INT_MAX_W 4096
 #include "ap_int.h"
 #include "weights.hpp"
 #include "bnn-library.h"
-#include "data/memdata-conv-dws.h"
-#include "data/config-conv-dws.h"
+#include "memdata-conv-dws.h"
+#include "config-conv-dws.h"
 #include "activations.hpp"
 #include "weights.hpp"
 #include "activations.hpp"
