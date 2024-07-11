@@ -51,6 +51,9 @@
  
 #include <algorithm>
 #include "utils.hpp"
+#define CASSERT_DATAFLOW(x) {if (!(x)) {std::cout<< "CASSERT_DATAFLOW condition is not met " << endl; exit(-1);	}}
+#define MAX(x, y) (((x) > (y)) ? (x) : (y)) /* \brief Maximum value between x and y*/
+#define MIN(x, y) (((x) > (y)) ? (y) : (x)) /* !< \brief Minimum value between x and y*/
 
 /**
  * \brief     Memory resource pragma instantiation for the sliding window generator, default resource
@@ -136,6 +139,311 @@ template <typename T>
 void memory_resource(T inputBuf, ap_resource_lutram const&){
 #pragma HLS BIND_STORAGE variable=inputBuf type=RAM_S2P impl=LUTRAM
 }
+
+
+/**
+ * \brief Sliding Window unit that produces output vectors for feeding
+ * a Matrix_Vector_Activate_Batch, implementing the im2col algorithm. To be used only if
+ * ConvKernelDim%Stride = 0
+ *
+ * \tparam ConvKernelDim    Dimension of the convolutional kernel (assumed square)
+ * \tparam IFMChannels      Number of Input Feature Maps
+ * \tparam Input_precision  Number bits per pixel
+ * \tparam IFMDim           Width and Heigth of the Input Feature Map (assumed square)
+ * \tparam OFMDim           Width and Heigth of the Output Feature Map (assumed square)
+ * \tparam SIMD             Number of input columns computed in parallel
+ * \tparam Stride           Stride of the convolutional kernel
+ * \tparam R          	  Datatype for the resource used for FPGA implementation of the SWG  - safely deducible from the paramaters
+ *
+ * \param in                Input stream
+ * \param out               Output stream
+ * \param numReps           Number of time the function has to be repeatedly executed (e.g. number of images)
+ * \param r			  Resource type for the hardware implementation of the memory block
+ */
+template<unsigned int ConvKernelDim,
+        unsigned int IFMChannels,
+        unsigned int Input_precision,
+        unsigned int IFMDim,
+        unsigned int OFMDim,
+        unsigned int SIMD_in,
+        unsigned int SIMD_out,
+        unsigned int Stride,
+        typename R>
+void ConvolutionInputGeneratorSIMDPruned(
+        stream<ap_uint<SIMD_in*Input_precision> > & in,
+        stream<ap_uint<SIMD_out*Input_precision> > & out,
+        const unsigned int numReps,
+        //const bool **SIMD_pruning_mask,
+        const bool SIMD_pruning_mask[][SIMD_in],
+        R const &r) {
+    CASSERT_DATAFLOW(IFMChannels % SIMD_in == 0);
+    CASSERT_DATAFLOW(IFMChannels % SIMD_out == 0);
+    CASSERT_DATAFLOW(ConvKernelDim % Stride == 0);
+    const unsigned int multiplying_factor = IFMChannels/SIMD_in;
+    const unsigned int number_blocks = ConvKernelDim/Stride + 1;
+    ap_uint<SIMD_in*Input_precision> inputBuf[number_blocks][Stride * IFMDim * multiplying_factor];
+
+#pragma HLS ARRAY_PARTITION variable=inputBuf complete dim=1
+    memory_resource(inputBuf, r);
+    const unsigned int cycles_write_block = (OFMDim * ConvKernelDim * ConvKernelDim * multiplying_factor);
+    const unsigned int cycles_read_block = Stride * IFMDim * multiplying_factor;
+    const unsigned int max_cycles = MAX(cycles_write_block,cycles_read_block);
+    const unsigned int baseIter = IFMDim * ConvKernelDim * multiplying_factor// Initial buffer
+                                  + OFMDim * MAX(cycles_write_block,cycles_read_block);
+    unsigned int counter_internal_block = 0;
+    unsigned int current_block_write = 0;
+    unsigned int next_block_write = 0;
+    unsigned int current_line = 0;
+    unsigned int read_block = 0;
+    unsigned int inp = 0, ofm_y = 0, ofm_x = 0, k_y = 0, k_x = 0, count_simd =0;
+#pragma HLS reset variable=inp
+    for (unsigned int count_image = 0; count_image < numReps; count_image++) {
+        for (unsigned int i = 0; i < baseIter; i++) {
+#pragma HLS PIPELINE II=1
+            if (inp < IFMDim * ConvKernelDim*multiplying_factor) {// Initial buffer of ConvKernelDim lines
+                ap_uint<SIMD_in*Input_precision> inElem;
+                inElem = in.read();
+                inputBuf[current_block_write][current_line] = inElem;
+                current_line++;
+                inp++;
+                if (current_line == Stride * IFMDim * multiplying_factor ) {
+                    current_line = 0;
+                    current_block_write++;
+                    if (current_block_write == number_blocks) {
+                        current_block_write=0;
+                    }
+                    read_block++;
+                    counter_internal_block = 0;
+                }
+            } else {
+                if (counter_internal_block < cycles_write_block-1) { // We are writing output, MMV IFMChan per cycle
+                    unsigned int current_block_read = (current_block_write + 1 + k_y / Stride);
+                    if (current_block_read >= number_blocks) {
+                        current_block_read-= number_blocks;
+                    }
+                    unsigned int current_line_in_block = ((k_y%Stride) * IFMDim + ofm_x*Stride + k_x)*multiplying_factor + count_simd;
+                    ap_uint<SIMD_in*Input_precision> outElem_SIMD_in = inputBuf[current_block_read][current_line_in_block];
+                    ap_uint<SIMD_out*Input_precision> outElem_SIMD_out;
+                    // Find out in which SIMD block we currently are
+                    int SIMD_block_index = count_simd + k_x*IFMChannels/SIMD_in + k_y*IFMChannels/SIMD_in*ConvKernelDim;
+                    // reduce the out element to fit the output SIMD width
+                    // ToDo: Investigate if the loop should be pipelined, unrolled or both?
+                    // Documentation can be found here: https://www.xilinx.com/html_docs/xilinx2019_1/sdaccel_doc/hls-pragmas-okr1504034364623.html
+                    int out_index = 0;
+                    for(int i_SIMD = 0; i_SIMD < SIMD_in; i_SIMD++){
+#pragma HLS pipeline
+                        // find is_masked true indexes and keep them into an array then iterate over that in parallel
+                        bool is_masked = SIMD_pruning_mask[SIMD_block_index][i_SIMD];
+                        if(is_masked){
+                        	unsigned int out_offset = out_index * Input_precision;
+                        	unsigned int in_offset = i_SIMD * Input_precision;
+                            outElem_SIMD_out.range(out_offset, out_offset + Input_precision -1) = outElem_SIMD_in.range(in_offset, in_offset + Input_precision -1);
+                            // make sure we stay in bounds, but this should never happen anyways
+                            if(out_index < SIMD_out){
+                                out_index++;
+                            }
+                        }
+                    }
+                    // write reduced output element
+                    out.write(outElem_SIMD_out);
+
+                    count_simd++;
+                    if (count_simd == multiplying_factor) {
+                        count_simd=0;
+                        k_x++;
+                        if (k_x == ConvKernelDim) {
+                            k_x = 0;
+                            k_y++;
+                            if (k_y == ConvKernelDim) {
+                                k_y = 0;
+                                ofm_x ++;
+                                if (ofm_x == OFMDim) {
+                                    ofm_x = 0;
+                                    ofm_y++;
+                                    if (ofm_y == OFMDim) {
+                                        ofm_y = 0;
+                                        inp = 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if ((counter_internal_block < cycles_read_block-1) && (read_block<IFMDim/Stride)) { // In parallel we write in the buffer, in the current block write if we still need to
+                    ap_uint<SIMD_in*Input_precision> inElem;
+                    inElem = in.read();
+                    inputBuf[current_block_write][current_line] = inElem;
+#pragma AP dependence variable=inputBuf intra false
+#pragma AP dependence variable=inputBuf inter false
+                    current_line++;
+                    if (current_line == Stride * IFMDim * multiplying_factor) {// We read the whole block, we change the next block in which we want to we
+                        // We filled up a block, let's not read until
+                        current_line = 0;
+                        read_block++;
+                        current_block_write++;
+                        if (current_block_write == number_blocks) {
+                            current_block_write=0;
+                        }
+#pragma AP dependence variable=current_block_write intra false
+                    }
+                }
+                counter_internal_block++; // = (counter_internal_block +1) % max_cycles;
+                if (counter_internal_block == (max_cycles-1)) {
+                    counter_internal_block = 0;
+                }
+            }
+        } // End base_iter
+        read_block = 0;
+    } // End count_image
+} // End generator
+
+
+
+/**
+ * \brief Sliding Window unit that produces output vectors for feeding
+ * a Matrix_Vector_Activate_Batch, implementing the im2col algorithm. To be used only if
+ * ConvKernelDim%Stride = 0
+ *
+ * \tparam ConvKernelDim    Dimension of the convolutional kernel (assumed square)
+ * \tparam IFMChannels      Number of Input Feature Maps
+ * \tparam Input_precision  Number bits per pixel
+ * \tparam IFMDim           Width and Heigth of the Input Feature Map (assumed square)
+ * \tparam OFMDim           Width and Heigth of the Output Feature Map (assumed square)
+ * \tparam SIMD             Number of input columns computed in parallel
+ * \tparam Stride           Stride of the convolutional kernel
+ * \tparam R          	  Datatype for the resource used for FPGA implementation of the SWG  - safely deducible from the paramaters
+ *
+ * \param in                Input stream
+ * \param out               Output stream
+ * \param numReps           Number of time the function has to be repeatedly executed (e.g. number of images)
+ * \param r			  Resource type for the hardware implementation of the memory block
+ */
+template<unsigned int ConvKernelDim,
+		 unsigned int IFMChannels,
+		 unsigned int Input_precision,
+		 unsigned int IFMDim,
+		 unsigned int OFMDim,
+		 unsigned int SIMD,
+		 unsigned int Stride,
+		 typename R>
+void ConvolutionInputGeneratorPruned(
+		stream<ap_uint<SIMD*Input_precision> > & in,
+		stream<ap_uint<SIMD*Input_precision> > & out,
+		const unsigned int numReps,
+		const bool *ColsToPrune,
+		R const &r) {
+  CASSERT_DATAFLOW(IFMChannels % SIMD == 0);
+  CASSERT_DATAFLOW(ConvKernelDim % Stride == 0);
+  const unsigned int multiplying_factor = IFMChannels/SIMD;
+  const unsigned int number_blocks = ConvKernelDim/Stride + 1;
+  ap_uint<SIMD*Input_precision> inputBuf[number_blocks][Stride * IFMDim * multiplying_factor];
+
+#pragma HLS ARRAY_PARTITION variable=inputBuf complete dim=1
+  memory_resource(inputBuf, r);
+  const unsigned int cycles_write_block = (OFMDim * ConvKernelDim * ConvKernelDim * multiplying_factor);
+  const unsigned int cycles_read_block = Stride * IFMDim * multiplying_factor;
+  const unsigned int max_cycles = MAX(cycles_write_block,cycles_read_block);
+  const unsigned int baseIter = IFMDim * ConvKernelDim * multiplying_factor// Initial buffer
+			                  + OFMDim * MAX(cycles_write_block,cycles_read_block);
+  unsigned int counter_internal_block = 0;
+  unsigned int current_block_write = 0;
+  unsigned int next_block_write = 0;
+  unsigned int current_line = 0;
+  unsigned int read_block = 0;
+  unsigned int inp = 0, ofm_y = 0, ofm_x = 0, k_y = 0, k_x = 0, count_simd =0;
+#pragma HLS reset variable=inp
+  for (unsigned int count_image = 0; count_image < numReps; count_image++) {
+    for (unsigned int i = 0; i < baseIter; i++) {
+#pragma HLS PIPELINE II=1
+      if (inp < IFMDim * ConvKernelDim*multiplying_factor) {// Initial buffer of ConvKernelDim lines
+        ap_uint<SIMD*Input_precision> inElem;
+        inElem = in.read();
+        inputBuf[current_block_write][current_line] = inElem;
+        current_line++;
+        inp++;
+        if (current_line == Stride * IFMDim * multiplying_factor ) {
+          current_line = 0;
+          current_block_write++;
+          if (current_block_write == number_blocks) {
+            current_block_write=0;
+          }
+          read_block++;
+          counter_internal_block = 0;
+        }
+      } else {
+        if (counter_internal_block < cycles_write_block-1) { // We are writing output, MMV IFMChan per cycle
+          unsigned int current_block_read = (current_block_write + 1 + k_y / Stride);
+          if (current_block_read >= number_blocks) {
+            current_block_read-= number_blocks;
+		  }
+          unsigned int current_line_in_block = ((k_y%Stride) * IFMDim + ofm_x*Stride + k_x)*multiplying_factor + count_simd;
+          ap_uint<SIMD*Input_precision> outElem = inputBuf[current_block_read][current_line_in_block];
+          // skip writing if this is a column we want to prune
+          // if a column was pruned we need to skip parts of the matrix
+		  int pruning_index = count_simd + k_x*IFMChannels/SIMD + k_y*IFMChannels/SIMD*ConvKernelDim;
+          //int pruning_index = ofm_x + ofm_y*OFMDim;  // Old pruning index, was pruning rows instead of cols
+          bool needs_pruning = ColsToPrune[pruning_index];
+          if(!needs_pruning){
+        	  out.write(outElem);
+          }
+
+          count_simd++;
+          if (count_simd == multiplying_factor) {
+            count_simd=0;
+            k_x++;
+            if (k_x == ConvKernelDim) {
+              k_x = 0;
+              k_y++;
+              if (k_y == ConvKernelDim) {
+                k_y = 0;
+                ofm_x ++;
+                if (ofm_x == OFMDim) {
+                  ofm_x = 0;
+                  ofm_y++;
+                  if (ofm_y == OFMDim) {
+                    ofm_y = 0;
+                    inp = 0;
+                  }
+                }
+              }
+            }
+          }
+        }
+        if ((counter_internal_block < cycles_read_block-1) && (read_block<IFMDim/Stride)) { // In parallel we write in the buffer, in the current block write if we still need to
+          ap_uint<SIMD*Input_precision> inElem;
+          inElem = in.read();
+          inputBuf[current_block_write][current_line] = inElem;
+#pragma AP dependence variable=inputBuf intra false
+#pragma AP dependence variable=inputBuf inter false
+          current_line++;
+          if (current_line == Stride * IFMDim * multiplying_factor) {// We read the whole block, we change the next block in which we want to we
+            // We filled up a block, let's not read until
+            current_line = 0;
+            read_block++;
+            current_block_write++;
+            if (current_block_write == number_blocks) {
+              current_block_write=0;
+			}
+#pragma AP dependence variable=current_block_write intra false
+          }
+        }
+        counter_internal_block++; // = (counter_internal_block +1) % max_cycles;
+        if (counter_internal_block == (max_cycles-1)) {
+          counter_internal_block = 0;
+        }
+      }
+    } // End base_iter
+	read_block = 0;
+  } // End count_image
+} // End generator
+
+
+
+
+
+
+
+
 
 /**
  * \brief Sliding Window unit that produces output vectors for feeding
