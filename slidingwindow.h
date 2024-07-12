@@ -51,7 +51,7 @@
  
 #include <algorithm>
 #include "utils.hpp"
-#define CASSERT_DATAFLOW(x) {if (!(x)) {std::cout<< "CASSERT_DATAFLOW condition is not met " << endl; exit(-1);	}}
+#define CASSERT_DATAFLOW(x) {if (!(x)) {std::cout<< "CASSERT_DATAFLOW condition is not met " << std::endl; exit(-1);	}}
 #define MAX(x, y) (((x) > (y)) ? (x) : (y)) /* \brief Maximum value between x and y*/
 #define MIN(x, y) (((x) > (y)) ? (y) : (x)) /* !< \brief Minimum value between x and y*/
 
