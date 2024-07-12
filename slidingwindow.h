@@ -170,8 +170,8 @@ template<unsigned int ConvKernelDim,
         unsigned int Stride,
         typename R>
 void ConvolutionInputGeneratorSIMDPruned(
-        stream<ap_uint<SIMD_in*Input_precision> > & in,
-        stream<ap_uint<SIMD_out*Input_precision> > & out,
+        hls::stream<ap_uint<SIMD_in*Input_precision> > & in,
+        hls::stream<ap_uint<SIMD_out*Input_precision> > & out,
         const unsigned int numReps,
         //const bool **SIMD_pruning_mask,
         const bool SIMD_pruning_mask[][SIMD_in],
