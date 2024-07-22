@@ -326,7 +326,7 @@ template<unsigned int ConvKernelDim,
 		 unsigned int SIMD,
 		 unsigned int Stride,
 		 typename R>
-void ConvolutionInputGeneratorPruned(
+void ConvolutionInputGeneratorPruned_hls(
 		hls::stream<ap_uint<SIMD*Input_precision> > & in,
 		hls::stream<ap_uint<SIMD*Input_precision> > & out,
 		const unsigned int numReps,
