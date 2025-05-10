@@ -179,11 +179,11 @@ template <unsigned int ConvKernelDim,
           unsigned int SIMD_out,
           unsigned int Stride,
           typename R>
-void ConvolutionInputGeneratorSIMDPruned(
+void ConvolutionInputGeneratorSIMDPruned_hls(
     hls::stream<ap_uint<SIMD_in * Input_precision>> &in,
     hls::stream<ap_uint<SIMD_out * Input_precision>> &out,
     const unsigned int numReps,
-    // const bool **SIMD_pruning_mask,
+    //const bool **SIMD_pruning_mask,
     const bool SIMD_pruning_mask[][SIMD_in],
     R const &r)
 {
@@ -374,6 +374,9 @@ void ConvolutionInputGeneratorPruned_hls(
 
 #pragma HLS ARRAY_PARTITION variable = inputBuf complete dim = 1
   memory_resource(inputBuf, r);
+  //alper 
+  //OFMDim is width
+  //ConvKernelDim * ConvKernelDim * IFMChannels is the required window to compute output 1 pixel
   const unsigned int cycles_write_block = (OFMDim * ConvKernelDim * ConvKernelDim * multiplying_factor);
   const unsigned int cycles_read_block = Stride * IFMDim * multiplying_factor;
   const unsigned int max_cycles = std::max(cycles_write_block, cycles_read_block);
@@ -381,7 +384,6 @@ void ConvolutionInputGeneratorPruned_hls(
                                 + OFMDim * std::max(cycles_write_block, cycles_read_block);
   unsigned int counter_internal_block = 0;
   unsigned int current_block_write = 0;
-  unsigned int next_block_write = 0;
   unsigned int current_line = 0;
   unsigned int read_block = 0;
   unsigned int inp = 0, ofm_y = 0, ofm_x = 0, k_y = 0, k_x = 0, count_simd = 0;
@@ -431,7 +433,6 @@ void ConvolutionInputGeneratorPruned_hls(
           }
 
           count_simd++;
-          //if we finished all channels
           if (count_simd == multiplying_factor)
           {
             count_simd = 0;
